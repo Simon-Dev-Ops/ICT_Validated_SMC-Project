@@ -1,0 +1,10 @@
+# MetaTrader compiled binaries
+*.ex4
+*.ex5
+
+# MetaEditor build logs
+*.log
+
+# OS artifacts
+Thumbs.db
+.DS_Store
