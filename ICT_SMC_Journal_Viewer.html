@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ICT SMC v1.6 — Trade Journal</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface2:  #21262d;
+  --border:    #30363d;
+  --text:      #c9d1d9;
+  --muted:     #8b949e;
+  --gold:      #d4a017;
+  --gold-dim:  #a07810;
+  --green:     #3fb950;
+  --red:       #f85149;
+  --blue:      #388bfd;
+  --accent:    #d4a017;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-logo {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+.header-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.btn {
+  background: var(--gold);
+  color: #000;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.btn:hover { background: #e6b520; }
+.btn-ghost {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--border); }
+#fileInput { display: none; }
+
+/* ── Drop Zone ── */
+#dropZone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 48px 32px;
+  text-align: center;
+  margin: 24px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+#dropZone:hover, #dropZone.drag-over {
+  border-color: var(--gold);
+  background: rgba(212,160,23,0.05);
+}
+#dropZone .drop-icon { font-size: 40px; margin-bottom: 12px; }
+#dropZone .drop-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+#dropZone .drop-hint { color: var(--muted); font-size: 12px; }
+#dropZone .drop-path {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--gold);
+  font-family: monospace;
+  background: rgba(212,160,23,0.1);
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+/* ── Main Content ── */
+#content { display: none; padding: 0 24px 32px; }
+
+/* ── Cards ── */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.card-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.card-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.c-gold  { color: var(--gold); }
+.c-green { color: var(--green); }
+.c-red   { color: var(--red); }
+.c-blue  { color: var(--blue); }
+.c-text  { color: var(--text); }
+
+/* ── Charts ── */
+.charts {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+.chart-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.chart-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+}
+.chart-wrap { position: relative; }
+
+/* ── Filters ── */
+.filters {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.filters label { font-size: 12px; color: var(--muted); margin-right: 4px; }
+.filters select, .filters input[type="date"], .filters input[type="text"] {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 9px;
+  font-size: 12px;
+  outline: none;
+}
+.filters select:focus, .filters input:focus { border-color: var(--gold); }
+.filter-sep { color: var(--border); }
+#tradeCount { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+/* ── Table ── */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.table-scroll { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+thead tr {
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+th {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+th:hover { color: var(--text); }
+th.sort-asc::after  { content: ' ▲'; color: var(--gold); }
+th.sort-desc::after { content: ' ▼'; color: var(--gold); }
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(48,54,61,0.5);
+  white-space: nowrap;
+}
+tbody tr:hover { background: rgba(33,38,45,0.8); }
+tbody tr:last-child td { border-bottom: none; }
+
+.dir-buy  { color: var(--green); font-weight: 600; }
+.dir-sell { color: var(--red);   font-weight: 600; }
+.win { color: var(--green); }
+.loss { color: var(--red); }
+.rr-good { color: var(--green); }
+.rr-bad  { color: var(--red); }
+.rr-flat { color: var(--muted); }
+.ticket { font-family: monospace; color: var(--muted); font-size: 11px; }
+
+/* Win/Loss badge */
+.wl-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.wl-w { background: rgba(63,185,80,0.15); color: var(--green); }
+.wl-l { background: rgba(248,81,73,0.15); color: var(--red); }
+.wl-s { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+/* Score pill */
+.score-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(212,160,23,0.15);
+  color: var(--gold);
+}
+
+.no-data { padding: 32px; text-align: center; color: var(--muted); }
+
+/* ── Trade Grades ── */
+.grade { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; font-family:monospace; }
+.grade-ap { background:rgba(0,212,170,0.15); color:#00d4aa; }
+.grade-a  { background:rgba(63,185,80,0.15);  color:#3fb950; }
+.grade-b  { background:rgba(212,160,23,0.15); color:#d4a017; }
+.grade-c  { background:rgba(240,165,0,0.15);  color:#f0a500; }
+.grade-d  { background:rgba(248,81,73,0.15);  color:#f85149; }
+.grade-f  { background:rgba(139,148,158,0.15);color:#8b949e; }
+.grade-dist { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.gd-item { display:flex; flex-direction:column; align-items:center; background:var(--surface2); border-radius:6px; padding:8px 14px; min-width:56px; }
+.gd-label { font-size:18px; font-weight:700; }
+.gd-count { font-size:11px; color:var(--muted); margin-top:2px; }
+
+/* ── Analysis Panel ── */
+.analysis-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.analysis-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.analysis-verdict {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 20px;
+}
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.analysis-metric {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.am-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.am-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.am-value { font-size: 13px; font-weight: 700; }
+.am-bench { font-size: 10px; color: var(--muted); margin-bottom: 5px; }
+.am-comment { font-size: 11px; color: var(--text); line-height: 1.5; }
+.analysis-actions {
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.aa-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.aa-item { font-size: 12px; color: var(--text); padding: 3px 0; line-height: 1.45; border-bottom: 1px solid var(--border); }
+.aa-item:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div class="header-logo">ICT SMC v1.6</div>
+    <div class="header-sub">Trade Journal Dashboard — EA Magic 20260615</div>
+  </div>
+  <div class="header-right">
+    <span id="headerFile" style="font-size:11px;color:var(--muted)"></span>
+    <button class="btn btn-ghost" onclick="document.getElementById('fileInput').click()">Load CSV</button>
+    <input type="file" id="fileInput" accept=".csv">
+  </div>
+</div>
+
+<!-- Drop Zone -->
+<div id="dropZone">
+  <div class="drop-icon">📂</div>
+  <div class="drop-title">Drop your journal CSV here</div>
+  <div class="drop-hint">or click "Load CSV" above</div>
+  <div class="drop-path">
+    MT4/Files/ICT_SMC_Journal.csv
+  </div>
+</div>
+
+<!-- Main Content -->
+<div id="content">
+
+  <!-- Summary Cards -->
+  <div class="cards" id="cards"></div>
+
+  <!-- Analysis Panel -->
+  <div id="analysis"></div>
+
+  <!-- Charts -->
+  <div class="charts">
+    <div class="chart-box">
+      <div class="chart-title">Equity Curve (Cumulative Net P&amp;L)</div>
+      <div class="chart-wrap" style="height:200px">
+        <canvas id="equityChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title">Win / Loss Breakdown</div>
+      <div class="chart-wrap" style="height:200px">
+        <canvas id="wlChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <label>Direction</label>
+    <select id="fDir">
+      <option value="">All</option>
+      <option value="BUY">BUY</option>
+      <option value="SELL">SELL</option>
+    </select>
+    <span class="filter-sep">|</span>
+    <label>Symbol</label>
+    <select id="fSym"><option value="">All</option></select>
+    <span class="filter-sep">|</span>
+    <label>Source</label>
+    <select id="fMagic"><option value="">All</option></select>
+    <span class="filter-sep">|</span>
+    <label>Result</label>
+    <select id="fResult">
+      <option value="">All</option>
+      <option value="win">Win</option>
+      <option value="loss">Loss</option>
+      <option value="scratch">Scratch</option>
+    </select>
+    <span class="filter-sep">|</span>
+    <label>From</label>
+    <input type="date" id="fFrom">
+    <label>To</label>
+    <input type="date" id="fTo">
+    <span class="filter-sep">|</span>
+    <button class="btn btn-ghost" onclick="clearFilters()" style="padding:5px 12px;font-size:12px">Clear</button>
+    <span id="tradeCount"></span>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-scroll">
+      <table id="tradesTable">
+        <thead>
+          <tr>
+            <th onclick="sortTable(0)"  data-col="0">#</th>
+            <th onclick="sortTable(1)"  data-col="1">Ticket</th>
+            <th onclick="sortTable(2)"  data-col="2">Open Time</th>
+            <th onclick="sortTable(3)"  data-col="3">Close Time</th>
+            <th onclick="sortTable(4)"  data-col="4">Sym</th>
+            <th onclick="sortTable(5)"  data-col="5">Dir</th>
+            <th onclick="sortTable(6)"  data-col="6">Source</th>
+            <th onclick="sortTable(7)"  data-col="7">Lots</th>
+            <th onclick="sortTable(8)"  data-col="8">Entry</th>
+            <th onclick="sortTable(9)"  data-col="9">SL</th>
+            <th onclick="sortTable(10)" data-col="10">TP</th>
+            <th onclick="sortTable(11)" data-col="11">Close</th>
+            <th onclick="sortTable(12)" data-col="12">Score</th>
+            <th onclick="sortTable(13)" data-col="13">Profit</th>
+            <th onclick="sortTable(14)" data-col="14">Swap</th>
+            <th onclick="sortTable(15)" data-col="15">Comm</th>
+            <th onclick="sortTable(16)" data-col="16">Net</th>
+            <th onclick="sortTable(17)" data-col="17">RR</th>
+            <th>Result</th>
+            <th>Grade</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody">
+          <tr><td colspan="19" class="no-data">Load a CSV file to view trades</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let allTrades = [];
+let filteredTrades = [];
+let sortCol = -1;
+let sortAsc = true;
+let equityChartInst = null;
+let wlChartInst = null;
+
+// ── File Loading ───────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) readFile(f);
+});
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.csv')) readFile(f);
+});
+
+function readFile(f) {
+  document.getElementById('headerFile').textContent = f.name;
+  const reader = new FileReader();
+  reader.onload = e => parseCSV(e.target.result);
+  reader.readAsText(f);
+}
+
+// ── CSV Parser ─────────────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (lines.length < 1) { alert('CSV appears empty or invalid.'); return; }
+
+  // Auto-detect delimiter: semicolon (European/SA locale MT4) or comma
+  const delim = (lines[0].split(';').length > lines[0].split(',').length) ? ';' : ',';
+
+  // Auto-detect header: if first field of first line is numeric, no header row
+  const firstField = lines[0].split(delim)[0].trim();
+  const hasHeader  = isNaN(parseInt(firstField));
+  const rows = hasHeader ? lines.slice(1) : lines;
+  allTrades = [];
+
+  rows.forEach((line, idx) => {
+    const cols = splitCSVLine(line, delim);
+    if (cols.length < 16) return;
+
+    const net    = parseFloat(cols[15]) || 0;
+    const rr     = parseFloat(cols[16]) || 0;
+    const profit = parseFloat(cols[12]) || 0;
+    const magic  = (cols[5] || '0').trim();
+
+    allTrades.push({
+      idx:      idx + 1,
+      ticket:   cols[0].trim(),
+      openTime: cols[1].trim(),
+      closeTime:cols[2].trim(),
+      symbol:   cols[3].trim(),
+      dir:      cols[4].trim().toUpperCase(),
+      magic:    magic,
+      lots:     parseFloat(cols[6]) || 0,
+      openPx:   parseFloat(cols[7]) || 0,
+      sl:       cols[8].trim(),
+      tp:       cols[9].trim(),
+      closePx:  parseFloat(cols[10]) || 0,
+      score:    cols[11].trim(),
+      profit:   profit,
+      swap:     parseFloat(cols[13]) || 0,
+      comm:     parseFloat(cols[14]) || 0,
+      net:      net,
+      rr:       rr,
+      result:   net > 0.005 ? 'win' : net < -0.005 ? 'loss' : 'scratch',
+      openDate: cols[1].trim().substring(0, 10)
+    });
+  });
+
+  if (allTrades.length === 0) { alert('No valid EA trades found in file.'); return; }
+
+  // Populate symbol filter
+  const syms = [...new Set(allTrades.map(t => t.symbol))].sort();
+  const fSym = document.getElementById('fSym');
+  fSym.innerHTML = '<option value="">All</option>';
+  syms.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; fSym.appendChild(o); });
+
+  const magics = [...new Set(allTrades.map(t => t.magic))].sort();
+  const fMagic = document.getElementById('fMagic');
+  fMagic.innerHTML = '<option value="">All</option><option value="EA">EA (20260615)</option><option value="manual">Manual (0)</option>';
+  magics.filter(m => m !== '0' && m !== '20260615').forEach(m => {
+    const o = document.createElement('option'); o.value = m; o.textContent = 'Magic ' + m; fMagic.appendChild(o);
+  });
+
+  // Show content
+  document.getElementById('dropZone').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  applyFilters();
+}
+
+function splitCSVLine(line, delim) {
+  delim = delim || ',';
+  const result = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === delim && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────
+['fDir','fSym','fMagic','fResult','fFrom','fTo'].forEach(id => {
+  document.getElementById(id).addEventListener('change', applyFilters);
+});
+
+function clearFilters() {
+  ['fDir','fSym','fMagic','fResult'].forEach(id => document.getElementById(id).value = '');
+  ['fFrom','fTo'].forEach(id => document.getElementById(id).value = '');
+  applyFilters();
+}
+
+function applyFilters() {
+  const dir    = document.getElementById('fDir').value;
+  const sym    = document.getElementById('fSym').value;
+  const magic  = document.getElementById('fMagic').value;
+  const result = document.getElementById('fResult').value;
+  const from   = document.getElementById('fFrom').value;
+  const to     = document.getElementById('fTo').value;
+
+  filteredTrades = allTrades.filter(t => {
+    if (dir    && t.dir    !== dir)    return false;
+    if (sym    && t.symbol !== sym)    return false;
+    if (result && t.result !== result) return false;
+    if (from   && t.openDate < from)   return false;
+    if (to     && t.openDate > to)     return false;
+    if (magic) {
+      if (magic === 'EA'     && t.magic !== '20260615') return false;
+      if (magic === 'manual' && t.magic !== '0')        return false;
+      if (magic !== 'EA' && magic !== 'manual' && t.magic !== magic) return false;
+    }
+    return true;
+  });
+
+  renderAll();
+}
+
+// ── Render Everything ──────────────────────────────────────────────────────
+function renderAll() {
+  renderCards();
+  renderAnalysis();
+  renderCharts();
+  renderTable();
+}
+
+// ── Analysis Panel ─────────────────────────────────────────────────────────
+function renderAnalysis() {
+  const t = filteredTrades;
+  if (t.length === 0) { document.getElementById('analysis').innerHTML = ''; return; }
+
+  const n         = t.length;
+  const wins      = t.filter(x => x.result === 'win').length;
+  const losses    = t.filter(x => x.result === 'loss').length;
+  const winPct    = n > 0 ? wins / n * 100 : 0;
+  const totWin    = t.filter(x => x.net > 0).reduce((s, x) => s + x.net, 0);
+  const totLoss   = Math.abs(t.filter(x => x.net < 0).reduce((s, x) => s + x.net, 0));
+  const pf        = totLoss > 0 ? totWin / totLoss : totWin > 0 ? 99 : 0;
+  const avgWin    = wins   > 0 ? totWin  / wins   : 0;
+  const avgLoss   = losses > 0 ? totLoss / losses : 0;
+  const wlRatio   = avgLoss > 0 ? avgWin / avgLoss : 0;
+  const expectancy = (winPct / 100 * avgWin) - ((1 - winPct / 100) * avgLoss);
+  const minWLForBE = winPct > 0 ? ((100 - winPct) / winPct) : 0;
+
+  const C = { good: 'var(--green)', warn: '#f0a500', bad: 'var(--red)' };
+  const BG = { good: 'rgba(63,185,80,0.12)', warn: 'rgba(240,165,0,0.12)', bad: 'rgba(248,81,73,0.12)' };
+  const IC = { good: '✅', warn: '⚠️', bad: '❌' };
+
+  const metrics = [
+    {
+      label: 'Profit Factor',
+      value: pf >= 99 ? '∞' : pf.toFixed(2),
+      benchmark: '≥ 1.5 professional · ≥ 1.0 minimum to pass FTMO',
+      rating: pf >= 1.5 ? 'good' : pf >= 1.0 ? 'warn' : 'bad',
+      comment: pf >= 2.0
+        ? 'Excellent. Well above FTMO standards — strategy has strong edge.'
+        : pf >= 1.5
+        ? 'Solid. Meets professional target. Protect this with consistent risk per trade.'
+        : pf >= 1.2
+        ? 'Developing. Profitable but slim margin. One bad drawdown period will hurt.'
+        : pf >= 1.0
+        ? 'Marginal. Technically profitable but not enough buffer to absorb FTMO fees and bad days.'
+        : `Losing. For every $1 won you lose $${(1 / Math.max(pf, 0.01)).toFixed(2)}. Strategy has no edge at current exits.`
+    },
+    {
+      label: 'Win Rate',
+      value: winPct.toFixed(1) + '%',
+      benchmark: '≥ 50% preferred · lower is OK with high W/L ratio',
+      rating: winPct >= 55 ? 'good' : winPct >= 45 ? 'warn' : 'bad',
+      comment: winPct >= 65
+        ? 'High win rate. Ensure you\'re not taking profits too early — that suppresses your W/L ratio.'
+        : winPct >= 55
+        ? 'Good win rate. Focus on letting winners run to improve W/L ratio.'
+        : winPct >= 45
+        ? `Acceptable. At ${winPct.toFixed(0)}% you need a W/L ratio ≥ ${minWLForBE.toFixed(2)}x to break even.`
+        : `Below 50%. You need W/L ratio ≥ ${minWLForBE.toFixed(2)}x to be profitable — currently ${wlRatio.toFixed(2)}x.`
+    },
+    {
+      label: 'Avg Win / Avg Loss',
+      value: wlRatio.toFixed(2) + 'x',
+      benchmark: `≥ ${minWLForBE.toFixed(2)}x needed to break even at ${winPct.toFixed(0)}% win rate`,
+      rating: wlRatio >= minWLForBE * 1.1 ? 'good' : wlRatio >= minWLForBE ? 'warn' : 'bad',
+      comment: wlRatio >= 1.5
+        ? `Strong. Avg win ($${avgWin.toFixed(0)}) is ${wlRatio.toFixed(1)}x avg loss ($${avgLoss.toFixed(0)}). Exits are healthy.`
+        : wlRatio >= 1.0
+        ? `Positive ratio. Avg win ($${avgWin.toFixed(0)}) > avg loss ($${avgLoss.toFixed(0)}).`
+        : wlRatio >= minWLForBE
+        ? `Just above break-even threshold. Avg loss ($${avgLoss.toFixed(0)}) is close to avg win ($${avgWin.toFixed(0)}).`
+        : `Critical: avg loss ($${avgLoss.toFixed(0)}) is ${(avgLoss / Math.max(avgWin, 1)).toFixed(1)}x avg win ($${avgWin.toFixed(0)}). Cut losses shorter or let winners run further.`
+    },
+    {
+      label: 'Expectancy / Trade',
+      value: (expectancy >= 0 ? '+' : '') + '$' + expectancy.toFixed(2),
+      benchmark: '> $0 — must be positive to pass any FTMO challenge',
+      rating: expectancy > 5 ? 'good' : expectancy > 0 ? 'warn' : 'bad',
+      comment: expectancy > 20
+        ? `Strong edge: expected +$${expectancy.toFixed(2)} per trade. Over ${n} trades that's +$${(expectancy * n).toFixed(0)} theoretical.`
+        : expectancy > 0
+        ? `Thin positive edge (+$${expectancy.toFixed(2)}/trade). Fragile — a few outlier losses can turn negative.`
+        : `Negative expectancy: $${Math.abs(expectancy).toFixed(2)} lost per trade on average. Over ${n} trades = $${Math.abs(expectancy * n).toFixed(0)} lost to the market.`
+    }
+  ];
+
+  const goodCount = metrics.filter(m => m.rating === 'good').length;
+  const badCount  = metrics.filter(m => m.rating === 'bad').length;
+  let verdict, verdictRating;
+  if (pf >= 1.5 && expectancy > 0 && goodCount >= 3) {
+    verdict = 'FTMO READY';           verdictRating = 'good';
+  } else if (pf >= 1.0 && expectancy > 0) {
+    verdict = 'DEVELOPING — CLOSE';   verdictRating = 'warn';
+  } else if (pf >= 1.0) {
+    verdict = 'MARGINAL — NEEDS WORK'; verdictRating = 'warn';
+  } else {
+    verdict = 'NOT PROFITABLE — FIX EXITS'; verdictRating = 'bad';
+  }
+
+  const actions = [];
+  if (pf < 1.0)
+    actions.push(`Profit Factor ${pf.toFixed(2)} is the #1 problem — strategy loses more than it earns. Prioritise this above everything.`);
+  if (wlRatio < minWLForBE)
+    actions.push(`W/L ratio (${wlRatio.toFixed(2)}x) is below the ${minWLForBE.toFixed(2)}x break-even threshold for a ${winPct.toFixed(0)}% win rate. Either tighten your SL or extend TP.`);
+  if (winPct >= 55 && wlRatio < 1.0)
+    actions.push(`You win ${winPct.toFixed(0)}% of trades but avg loss ($${avgLoss.toFixed(0)}) exceeds avg win ($${avgWin.toFixed(0)}) — classic pattern of cutting winners early and holding losers too long.`);
+  if (expectancy < 0)
+    actions.push(`Negative expectancy means the strategy has no edge right now. FTMO requires consistent profitability — a lucky streak won't sustain a live account.`);
+  if (pf >= 1.5 && winPct >= 50)
+    actions.push(`Stats are FTMO-worthy. Focus on consistency — FTMO flags accounts that make 80%+ of profit in 1–2 trades (prop firm manipulation check).`);
+  if (pf >= 1.0 && pf < 1.5)
+    actions.push(`Profit Factor ${pf.toFixed(2)}: to reach 1.5 you need to either increase avg win by ${((avgLoss * 1.5 / winPct * 100) - avgWin).toFixed(0)} or reduce avg loss by ${(avgLoss - avgWin / 1.5).toFixed(0)} per trade.`);
+
+  document.getElementById('analysis').innerHTML = `
+    <div class="analysis-box">
+      <div class="analysis-header">
+        <span class="analysis-title">Performance Analysis vs FTMO Benchmarks</span>
+        <span class="analysis-verdict" style="color:${C[verdictRating]};background:${BG[verdictRating]}">
+          ${IC[verdictRating]} ${verdict}
+        </span>
+      </div>
+      <div class="analysis-grid">
+        ${metrics.map(m => `
+          <div class="analysis-metric" style="border-left:3px solid ${C[m.rating]}">
+            <div class="am-top">
+              <span class="am-label">${m.label}</span>
+              <span class="am-value" style="color:${C[m.rating]}">${IC[m.rating]} ${m.value}</span>
+            </div>
+            <div class="am-bench">Benchmark: ${m.benchmark}</div>
+            <div class="am-comment">${m.comment}</div>
+          </div>`).join('')}
+      </div>
+      ${actions.length > 0 ? `
+      <div class="analysis-actions">
+        <div class="aa-title">Key Actions</div>
+        ${actions.map(a => `<div class="aa-item">→ ${a}</div>`).join('')}
+      </div>` : ''}
+      <div style="margin-top:12px">
+        <div class="aa-title" style="color:var(--muted);margin-bottom:8px">Trade Grade Distribution</div>
+        <div class="grade-dist">${(()=>{
+          const wT = t.filter(x=>x.net>0); const lT = t.filter(x=>x.net<0);
+          const aW = wT.length>0?wT.reduce((s,x)=>s+x.net,0)/wT.length:0;
+          const aL = lT.length>0?Math.abs(lT.reduce((s,x)=>s+x.net,0))/lT.length:0;
+          const grades = ['A+','A','B','C','D','F'];
+          const clss   = ['grade-ap','grade-a','grade-b','grade-c','grade-d','grade-f'];
+          const counts  = Object.fromEntries(grades.map(g=>[g,0]));
+          t.forEach(tr => { const g = getTradeGrade(tr, aW, aL); counts[g.grade]++; });
+          return grades.map((g,i)=>`
+            <div class="gd-item">
+              <span class="gd-label grade ${clss[i]}">${g}</span>
+              <span class="gd-count">${counts[g]} trade${counts[g]!==1?'s':''}</span>
+            </div>`).join('');
+        })()}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">
+          Grade = ICT signal score (40%) + R:R achieved (30%) + result quality vs your avg (30%)
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Cards ──────────────────────────────────────────────────────────────────
+function renderCards() {
+  const t = filteredTrades;
+  const n = t.length;
+  const wins   = t.filter(x => x.result === 'win').length;
+  const losses = t.filter(x => x.result === 'loss').length;
+  const winPct = n > 0 ? (wins / n * 100).toFixed(1) : '0.0';
+  const totalNet = t.reduce((s, x) => s + x.net, 0);
+  const totalProfit = t.filter(x => x.net > 0).reduce((s, x) => s + x.net, 0);
+  const totalLoss   = Math.abs(t.filter(x => x.net < 0).reduce((s, x) => s + x.net, 0));
+  const pf = totalLoss > 0 ? (totalProfit / totalLoss).toFixed(2) : totalProfit > 0 ? '∞' : '0.00';
+  const rrVals  = t.filter(x => x.rr !== 0).map(x => x.rr);
+  const hasRR   = rrVals.length > 0;
+  const avgRR   = hasRR ? (rrVals.reduce((s, x) => s + x, 0) / rrVals.length).toFixed(2) : null;
+  const winTrades  = t.filter(x => x.net > 0);
+  const lossTrades = t.filter(x => x.net < 0);
+  const avgWin  = winTrades.length  > 0 ? winTrades.reduce((s, x) => s + x.net, 0)  / winTrades.length  : 0;
+  const avgLoss = lossTrades.length > 0 ? Math.abs(lossTrades.reduce((s, x) => s + x.net, 0) / lossTrades.length) : 0;
+  const wlRatio = avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : avgWin > 0 ? '∞' : '—';
+  const nets   = t.map(x => x.net);
+  const best   = nets.length > 0 ? Math.max(...nets) : 0;
+  const worst  = nets.length > 0 ? Math.min(...nets) : 0;
+
+  // Winning streak
+  let streak = 0, maxStreak = 0, cur = 0;
+  t.forEach(x => {
+    if (x.result === 'win') { cur++; maxStreak = Math.max(maxStreak, cur); }
+    else { cur = 0; }
+  });
+
+  const cards = [
+    { label: 'Total Trades',   value: n,                   sub: `${wins}W / ${losses}L`,                                    cls: 'c-text' },
+    { label: 'Win Rate',       value: winPct + '%',         sub: `${wins} wins of ${n}`,                                     cls: parseFloat(winPct) >= 50 ? 'c-green' : 'c-red' },
+    { label: 'Net P&L',        value: fmtMoney(totalNet),   sub: 'After swap & commission',                                  cls: totalNet >= 0 ? 'c-green' : 'c-red' },
+    { label: 'Total Win',      value: fmtMoney(totalProfit),sub: `${winTrades.length} winning trades`,                       cls: 'c-green' },
+    { label: 'Total Loss',     value: fmtMoney(-totalLoss), sub: `${lossTrades.length} losing trades`,                      cls: 'c-red' },
+    { label: 'Profit Factor',  value: pf,                   sub: `Win $${totalProfit.toFixed(0)} / Loss $${totalLoss.toFixed(0)}`, cls: parseFloat(pf) >= 1.5 ? 'c-green' : parseFloat(pf) >= 1 ? 'c-gold' : 'c-red' },
+    hasRR
+      ? { label: 'Avg RR',         value: avgRR + 'R',       sub: `on ${rrVals.length} trades`,                              cls: parseFloat(avgRR) >= 1 ? 'c-green' : 'c-gold' }
+      : { label: 'W/L Ratio',      value: wlRatio + 'x',     sub: `$${avgWin.toFixed(0)} avg win / $${avgLoss.toFixed(0)} avg loss`, cls: parseFloat(wlRatio) >= 1 ? 'c-green' : 'c-red' },
+    { label: 'Best Trade',     value: fmtMoney(best),       sub: 'Single trade',                                             cls: 'c-green' },
+    { label: 'Worst Trade',    value: fmtMoney(worst),      sub: 'Single trade',                                             cls: 'c-red' },
+    { label: 'Best Streak',    value: maxStreak + 'W',      sub: 'Consecutive wins',                                        cls: 'c-gold' },
+  ];
+
+  document.getElementById('cards').innerHTML = cards.map(c => `
+    <div class="card">
+      <div class="card-label">${c.label}</div>
+      <div class="card-value ${c.cls}">${c.value}</div>
+      <div class="card-sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+// ── Charts ─────────────────────────────────────────────────────────────────
+function renderCharts() {
+  renderEquityCurve();
+  renderWLChart();
+}
+
+function renderEquityCurve() {
+  const t = filteredTrades;
+  let cumNet = 0;
+  const labels = [];
+  const data   = [];
+  t.forEach((x, i) => {
+    cumNet += x.net;
+    labels.push('#' + (i + 1));
+    data.push(+cumNet.toFixed(2));
+  });
+
+  const positive = data.map(v => v >= 0 ? v : null);
+  const negative = data.map(v => v <  0 ? v : null);
+
+  if (equityChartInst) { equityChartInst.destroy(); equityChartInst = null; }
+
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  equityChartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Net P&L',
+        data,
+        borderColor: '#3fb950',
+        borderWidth: 2,
+        pointRadius: t.length > 100 ? 0 : 3,
+        pointBackgroundColor: data.map(v => v >= 0 ? '#3fb950' : '#f85149'),
+        fill: {
+          target: 'origin',
+          above: 'rgba(63,185,80,0.08)',
+          below: 'rgba(248,81,73,0.08)'
+        },
+        tension: 0.1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: { label: ctx => ' $' + ctx.parsed.y.toFixed(2) }
+      }},
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 10, font: { size: 10 } }, grid: { color: 'rgba(48,54,61,0.5)' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 }, callback: v => '$' + v },
+             grid: { color: 'rgba(48,54,61,0.5)' } }
+      }
+    }
+  });
+}
+
+function renderWLChart() {
+  const t = filteredTrades;
+  const wins    = t.filter(x => x.result === 'win').length;
+  const losses  = t.filter(x => x.result === 'loss').length;
+  const scratch = t.filter(x => x.result === 'scratch').length;
+
+  if (wlChartInst) { wlChartInst.destroy(); wlChartInst = null; }
+
+  const ctx = document.getElementById('wlChart').getContext('2d');
+  wlChartInst = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Wins', 'Losses', 'Scratch'],
+      datasets: [{
+        data: [wins, losses, scratch],
+        backgroundColor: ['rgba(63,185,80,0.8)', 'rgba(248,81,73,0.8)', 'rgba(139,148,158,0.4)'],
+        borderColor:     ['#3fb950', '#f85149', '#8b949e'],
+        borderWidth: 1.5
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#8b949e', font: { size: 11 }, padding: 12 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} trades` } }
+      }
+    }
+  });
+}
+
+// ── Table ──────────────────────────────────────────────────────────────────
+function renderTable() {
+  const body = document.getElementById('tradesBody');
+  document.getElementById('tradeCount').textContent = `${filteredTrades.length} trade${filteredTrades.length !== 1 ? 's' : ''}`;
+
+  if (filteredTrades.length === 0) {
+    body.innerHTML = '<tr><td colspan="20" class="no-data">No trades match the current filter</td></tr>';
+    return;
+  }
+
+  const _wins  = filteredTrades.filter(x => x.net > 0);
+  const _loss  = filteredTrades.filter(x => x.net < 0);
+  const _avgW  = _wins.length  > 0 ? _wins.reduce((s, x) => s + x.net, 0) / _wins.length : 0;
+  const _avgL  = _loss.length  > 0 ? Math.abs(_loss.reduce((s, x) => s + x.net, 0)) / _loss.length : 0;
+
+  body.innerHTML = filteredTrades.map((t, i) => {
+    const dirCls   = t.dir === 'BUY' ? 'dir-buy' : 'dir-sell';
+    const netCls   = t.net > 0 ? 'win' : t.net < 0 ? 'loss' : '';
+    const tg       = getTradeGrade(t, _avgW, _avgL);
+    const rrCls    = t.rr > 0 ? 'rr-good' : t.rr < 0 ? 'rr-bad' : 'rr-flat';
+    const wlBadge  = t.result === 'win' ? '<span class="wl-badge wl-w">WIN</span>'
+                   : t.result === 'loss' ? '<span class="wl-badge wl-l">LOSS</span>'
+                   : '<span class="wl-badge wl-s">FLAT</span>';
+    const isEA     = t.magic === '20260615';
+    const srcBadge = isEA
+      ? '<span style="color:var(--gold);font-size:10px;font-weight:700">EA</span>'
+      : (t.magic === '0' || t.magic === ''
+          ? '<span style="color:var(--muted);font-size:10px">Manual</span>'
+          : `<span style="color:var(--blue);font-size:10px">${t.magic}</span>`);
+    const score    = t.score && t.score !== '?' && t.score !== '-' ? `<span class="score-pill">${t.score}</span>` : `<span style="color:var(--muted)">—</span>`;
+    return `<tr>
+      <td style="color:var(--muted)">${i + 1}</td>
+      <td class="ticket">${t.ticket}</td>
+      <td>${t.openTime}</td>
+      <td>${t.closeTime}</td>
+      <td style="font-weight:600">${t.symbol}</td>
+      <td class="${dirCls}">${t.dir}</td>
+      <td>${srcBadge}</td>
+      <td>${t.lots.toFixed(2)}</td>
+      <td>${t.openPx}</td>
+      <td style="color:var(--muted)">${t.sl || '—'}</td>
+      <td style="color:var(--muted)">${t.tp || '—'}</td>
+      <td>${t.closePx}</td>
+      <td>${score}</td>
+      <td class="${netCls}">${fmtMoney(t.profit)}</td>
+      <td style="color:var(--muted)">${fmtMoney(t.swap)}</td>
+      <td style="color:var(--muted)">${fmtMoney(t.comm)}</td>
+      <td class="${netCls}" style="font-weight:600">${fmtMoney(t.net)}</td>
+      <td class="${rrCls}">${t.rr !== 0 ? t.rr.toFixed(2) + 'R' : '—'}</td>
+      <td>${wlBadge}</td>
+      <td><span class="grade ${tg.cls}">${tg.grade}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Sort ───────────────────────────────────────────────────────────────────
+function sortTable(col) {
+  if (sortCol === col) { sortAsc = !sortAsc; }
+  else { sortCol = col; sortAsc = col === 0 || col === 2 || col === 3; }
+
+  document.querySelectorAll('th').forEach(th => { th.classList.remove('sort-asc', 'sort-desc'); });
+  const ths = document.querySelectorAll('th[data-col]');
+  ths.forEach(th => { if (parseInt(th.dataset.col) === col) th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc'); });
+
+  const keys = ['idx','ticket','openTime','closeTime','symbol','dir','magic','lots','openPx','sl','tp','closePx','score','profit','swap','comm','net','rr'];
+  const key = keys[col];
+
+  filteredTrades.sort((a, b) => {
+    let va = a[key], vb = b[key];
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  renderTable();
+}
+
+// ── Trade Grade ────────────────────────────────────────────────────────────
+function getTradeGrade(t, avgWinAmt, avgLossAmt) {
+  let pts = 0;
+
+  // 1. Signal score component (0–40 pts) — ICT quality of setup
+  if (t.score && t.score !== '-' && t.score !== '?') {
+    const parts = t.score.split('/');
+    if (parts.length === 2) {
+      const pct = parseInt(parts[1]) > 0 ? parseInt(parts[0]) / parseInt(parts[1]) : 0;
+      pts += Math.round(pct * 40);
+    } else { pts += 20; }
+  } else {
+    pts += 15; // no score metadata — neutral
+  }
+
+  // 2. RR component (0–30 pts) — did you respect the trade plan?
+  if (t.rr !== 0) {
+    pts += t.rr >= 3.0 ? 30 : t.rr >= 2.0 ? 25 : t.rr >= 1.5 ? 20 : t.rr >= 1.0 ? 14 : t.rr > 0 ? 6 : 0;
+  } else {
+    // No RR data — approximate from net vs averages
+    if (t.result === 'win') {
+      const r = avgWinAmt > 0 ? t.net / avgWinAmt : 0;
+      pts += r >= 1.5 ? 24 : r >= 1.0 ? 18 : 12;
+    } else if (t.result === 'scratch') {
+      pts += 14;
+    } else {
+      const r = avgLossAmt > 0 ? Math.abs(t.net) / avgLossAmt : 1;
+      pts += r <= 0.5 ? 10 : r <= 1.0 ? 5 : 0; // small loss = better than average
+    }
+  }
+
+  // 3. Result quality component (0–30 pts)
+  if (t.result === 'win') {
+    pts += t.net >= avgWinAmt * 1.5 ? 30 : t.net >= avgWinAmt ? 22 : 15;
+  } else if (t.result === 'scratch') {
+    pts += 15;
+  } else {
+    pts += Math.abs(t.net) <= avgLossAmt * 0.5 ? 12 : Math.abs(t.net) <= avgLossAmt ? 6 : 0;
+  }
+
+  if (pts >= 88) return { grade: 'A+', cls: 'grade-ap' };
+  if (pts >= 75) return { grade: 'A',  cls: 'grade-a' };
+  if (pts >= 58) return { grade: 'B',  cls: 'grade-b' };
+  if (pts >= 42) return { grade: 'C',  cls: 'grade-c' };
+  if (pts >= 28) return { grade: 'D',  cls: 'grade-d' };
+  return               { grade: 'F',  cls: 'grade-f' };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmtMoney(v) {
+  if (v === 0) return '$0.00';
+  return (v >= 0 ? '+' : '') + '$' + v.toFixed(2);
+}
+</script>
+</body>
+</html>

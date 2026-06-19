@@ -5,6 +5,15 @@
 # MetaEditor build logs
 *.log
 
+# VS Code workspace files
+.vscode/
+
+# EA settings presets folder
+set/
+
+# Claude Code memory (local only)
+.claude/
+
 # OS artifacts
 Thumbs.db
 .DS_Store

@@ -7,10 +7,13 @@
 //|         v1.94: IC Markets seasonal GMT+2/+3 auto-offset for      |
 //|         killzone/NY-time conversion (BarTimeToUtc). No signal/   |
 //|         scoring/cooldown logic changed.                          |
+//|         v2.00: Trade journal (all symbols/magics, backfill),     |
+//|         daily profit lock, partial close alerts, daily P&L       |
+//|         panel row, HTML journal viewer with FTMO analysis.       |
 //+------------------------------------------------------------------+
 #property copyright "ICT Validated SMC v1.6 EA LIVE"
 #property link      ""
-#property version   "1.94"
+#property version   "2.00"
 #property strict
 
 //--- array capacity (Pine caps referenced in comments)
@@ -62,7 +65,17 @@ enum ENUM_PANEL_LAYOUT
    PL_PINE    = 1   // two-column Pine v1.6 table
   };
 
-#define PANEL_ROWS       31
+//--- Risk sizing modes (see S12_Trade inputs for full descriptions)
+enum ENUM_RISK_MODE
+  {
+   RM_FIXED   = 0,  // Fixed lot — uses LotSize input directly; no dynamic sizing
+   RM_BALANCE = 1,  // Balance-based — % of closed/realised balance; stable, FTMO-safe
+   RM_EQUITY  = 2,  // Equity-based — % of live equity; aggressive, requires AllowEquityMode=true
+   RM_AVERAGE = 3,  // Average-based — % of (Balance + DayHighEquity + DayLowEquity) / 3; smoothed
+   RM_HYBRID  = 4   // Hybrid dynamic — leans toward equity when winning, toward balance when losing
+  };
+
+#define PANEL_ROWS       32
 #define COMPACT_PANEL_ROWS 10
 
 //+------------------------------------------------------------------+
@@ -223,7 +236,7 @@ input bool     EnableAlerts           = true;    // MT4 Alert() popup
 input bool     EnablePushNotify       = false;   // SendNotification() to mobile
 input bool     AlertPartialClose      = false;  // alert/push when a partial close fires (P1 or P2)
 input bool     ShowDailyPnL           = true;   // show today's realised+floating P&L and CB headroom on panel
-input bool     ShowMultiPairInfo      = false;  // show total open positions across all symbols with this MagicNumber
+input bool     ShowMultiPairInfo      = false;  // show total open positions across all symbols with this g_magic
 
 //+------------------------------------------------------------------+
 //| INPUTS �" Trade execution (EA)                                    |
@@ -232,10 +245,28 @@ input string   S12_Trade              = "=== TRADE EXECUTION ===";
 input bool     EnableTrading          = true;   // Kill-switch: false = signals only, no orders
 input bool     AllowLong              = true;
 input bool     AllowShort             = true;
-input double   LotSize                = 0.02;
-input bool     UseRiskPercent         = false;
-input double   RiskPercent            = 1.0;   // % of balance risked per trade
-input int      MagicNumber            = 20260615;
+// ── Position sizing ──────────────────────────────────────────────────────────
+// RM_FIXED:   always opens LotSize lots — no dynamic calculation.
+// RM_BALANCE: risk% of AccountBalance() — stable, recommended for FTMO challenges.
+// RM_EQUITY:  risk% of AccountEquity() (balance + floating P/L) — aggressive compounder;
+//             position sizes inflate when trades are in profit and shrink in drawdown.
+//             Requires AllowEquityMode = true or it falls back to RM_BALANCE silently.
+// RM_AVERAGE: risk% of (Balance + DayHighEquity + DayLowEquity) / 3 — smooths out
+//             intraday equity spikes so one lucky run doesn't inflate all subsequent lots.
+// RM_HYBRID:  asymmetric dynamic mode:
+//               Winning (equity > balance): Base = 0.5×Equity + 0.5×Balance  (moderate scale-up)
+//               Losing  (equity < balance): Base = 0.7×Balance + 0.3×Equity  (faster de-risk)
+//             Compounds during winning streaks, protects capital faster in drawdown.
+//             Best for funded accounts targeting long-term growth.
+// ─────────────────────────────────────────────────────────────────────────────
+input double         LotSize          = 0.02;           // lot size when RiskMode = RM_FIXED
+input ENUM_RISK_MODE RiskMode         = RM_FIXED;       // position sizing mode (RM_FIXED = behaves exactly as before)
+input double         RiskPercent      = 1.0;            // % of base capital risked per trade (only used when RiskMode != RM_FIXED)
+input double         MaxLotCap        = 0.00;           // hard maximum lots per trade (0 = no cap)
+input bool           AllowEquityMode  = false;          // safety lock: must be true to activate RM_EQUITY
+// 0 = auto: EA derives a unique magic from Symbol+Timeframe (same chart always gets same number after restart).
+// Set manually only if you need two instances on the same Symbol+TF, or to share a magic across timeframes.
+input int      MagicInput             = 0;
 input int      MaxSpreadPoints        = 50;    // 0 = disabled
 input int      Slippage               = 30;
 input bool     ECNMode                = false;  // IC Markets Raw/ECN: sends order without SL/TP then attaches them via OrderModify immediately after
@@ -282,7 +313,14 @@ input double   CB_MaxTotalLossPct     = 9.0;     // halt permanently if equity d
 input bool     CB_ResetInitialBalance = false;   // set true once to reset the total-DD baseline to current balance (e.g. starting a new challenge phase), then set back to false
 
 //+------------------------------------------------------------------+
-//| INPUTS � Trading hours (broker server time, NOT NY)              |
+//| INPUTS - Daily Profit Lock                                       |
+//+------------------------------------------------------------------+
+input string   S14b_ProfitLock        = "=== DAILY PROFIT LOCK ===";
+input bool     UseDailyProfitLock     = false;  // halt new entries once daily profit target is reached; existing trades run normally
+input double   DailyProfitLockPct     = 2.0;    // % of day-start balance — stop new entries when daily P&L hits this target
+
+//+------------------------------------------------------------------+
+//| INPUTS� Trading hours (broker server time, NOT NY)              |
 //+------------------------------------------------------------------+
 input string   S15_Hours              = "=== TRADING HOURS (broker time) ===";
 input bool     UseTradingHours        = false;    // master switch for the time-window gate
@@ -316,8 +354,27 @@ input double   MinPartialLots         = 0.01;   // never close/leave a remainder
 //| INPUTS - Trade Journal                                           |
 //+------------------------------------------------------------------+
 input string   S17_Journal            = "=== TRADE JOURNAL ===";
-input bool     UseTradeJournal        = false;  // log each closed trade to CSV in MQL4/Files/
+input bool     UseTradeJournal        = true;   // log each closed trade to CSV in MQL4/Files/
 input string   JournalFileName        = "ICT_SMC_Journal.csv";
+
+//+------------------------------------------------------------------+
+//| INPUTS — Safety gates (all OFF by default — enable deliberately) |
+//+------------------------------------------------------------------+
+input string   S18_Safety             = "=== SAFETY GATES ===";
+// Max trades per day — once this many EA trades have been opened today,
+// no further entries are placed until the next broker day.
+// Protects against signal-fire loops and one bad session spiralling.
+input bool     UseMaxTradesPerDay     = false;  // master switch (off = no daily trade limit)
+input int      MaxTradesPerDay        = 3;      // max EA trades to open per broker day
+// Max consecutive losses — halts new entries after N losses in a row.
+// Counter resets when a winning trade closes; reattach EA to reset manually.
+input bool     UseMaxConsecLosses     = false;  // master switch (off = no streak limit)
+input int      MaxConsecLosses        = 3;      // stop trading after this many back-to-back losses
+// Friday cut-off — blocks new entries after a set time on Fridays.
+// Prevents entering trades that carry over the weekend gap.
+// Uses broker server time (TimeCurrent()).
+input bool     UseFridayCutoff        = false;  // master switch (off = Friday treated like any day)
+input string   FridayCutoffTime       = "20:00"; // HH:MM broker time — no new entries after this on Fridays
 
 //+------------------------------------------------------------------+
 //| STRUCTS �" Pine type equivalents                                  |
@@ -580,6 +637,15 @@ string              g_cbCachedDay         = "";
 double              g_cbInitialBalance    = 0;    // balance at EA attach � baseline for total drawdown check
 bool                g_cbTotalTripped      = false; // latched permanently when CB_MaxTotalLossPct is breached; re-attach EA to reset
 int                 g_journalLastHistTotal = -1;  // trade journal: history count at last scan
+bool                g_profitLockToday     = false; // latched for the broker day when daily profit target is reached
+// RM_AVERAGE / RM_HYBRID equity tracking — reset each broker day in CB_UpdateDay()
+double              g_dayHighEquity       = 0;    // highest AccountEquity() seen today
+double              g_dayLowEquity        = 0;    // lowest  AccountEquity() seen today
+// Safety gate counters (S18_Safety inputs)
+int                 g_tradesToday         = 0;    // EA trades opened on current broker day (reset in CB_UpdateDay)
+int                 g_consecLosses        = 0;    // consecutive EA losses since last win (updated in Journal_CheckNewTrades)
+// Effective magic number — set once in OnInit from MagicInput or AutoMagic()
+int                 g_magic               = 0;
 
 // Trading hours � EOD flatten throttle only (broker server time via TimeCurrent())
 string              g_thEodFlattenedDay = "";
@@ -3650,7 +3716,7 @@ void MaybeRefreshNews()
 //+------------------------------------------------------------------+
 bool IsOurOrder()
   {
-   return(OrderSymbol() == Symbol() && OrderMagicNumber() == MagicNumber);
+   return(OrderSymbol() == Symbol() && OrderMagicNumber() == g_magic);
   }
 
 int CountOpenTrades(int orderType)
@@ -3704,6 +3770,12 @@ void CB_UpdateDay()
       g_cbCurrentDay = dayKey;
       g_cbDayStartBalance = AccountBalance();
       g_cbTrippedToday = false;
+      g_profitLockToday = false;
+      // Reset intraday equity envelope for RM_AVERAGE / RM_HYBRID
+      g_dayHighEquity = AccountEquity();
+      g_dayLowEquity  = AccountEquity();
+      // Reset daily trade counter for UseMaxTradesPerDay gate
+      g_tradesToday = 0;
      }
   }
 
@@ -3715,7 +3787,7 @@ double CB_DailyRealizedPnL()
      {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
          continue;
-      if(OrderMagicNumber() != MagicNumber)
+      if(OrderMagicNumber() != g_magic)
          continue;
       if(OrderSymbol() != Symbol())
          continue;
@@ -3970,6 +4042,47 @@ bool TH_EntryAllowed()
    return(inWin);
   }
 
+// Returns true when any enabled safety gate is blocking new entries.
+// All gates default to off (UseMaxTradesPerDay / UseMaxConsecLosses /
+// UseFridayCutoff are all false) — no behaviour changes until switched on.
+bool SG_IsBlocked()
+  {
+   if(UseMaxTradesPerDay && MaxTradesPerDay > 0 && g_tradesToday >= MaxTradesPerDay)
+     {
+      static int s_lastLoggedDay = -1;
+      int today = DayOfYear();
+      if(today != s_lastLoggedDay) { Print("ICT-V SafetyGate: MaxTradesPerDay=", MaxTradesPerDay, " reached today"); s_lastLoggedDay = today; }
+      return(true);
+     }
+
+   if(UseMaxConsecLosses && MaxConsecLosses > 0 && g_consecLosses >= MaxConsecLosses)
+     {
+      static bool s_loggedStreak = false;
+      if(!s_loggedStreak) { Print("ICT-V SafetyGate: ", g_consecLosses, " consecutive losses — entries halted until a win"); s_loggedStreak = true; }
+      return(true);
+     }
+
+   if(UseFridayCutoff && DayOfWeek() == 5)   // 5 = Friday in MQL4
+     {
+      // Parse "HH:MM" to minutes-since-midnight
+      string s = FridayCutoffTime;
+      int colon = StringFind(s, ":");
+      if(colon >= 1)
+        {
+         int cutoffMin = (int)StringToInteger(StringSubstr(s, 0, colon)) * 60
+                       + (int)StringToInteger(StringSubstr(s, colon + 1));
+         if(TH_BrokerMinOfDay() >= cutoffMin)
+           {
+            static bool s_loggedCutoff = false;
+            if(!s_loggedCutoff) { Print("ICT-V SafetyGate: Friday cut-off ", FridayCutoffTime, " reached — no new entries"); s_loggedCutoff = true; }
+            return(true);
+           }
+        }
+     }
+
+   return(false);
+  }
+
 bool TH_ParseEODMinutes(int &eodMin)
   {
    return(TH_ParseTimeToken(EODFlattenTime, eodMin));
@@ -4014,9 +4127,51 @@ bool TH_PostEODBlock()
    return(TH_BrokerMinOfDay() >= eodMin);
   }
 
+// Returns the capital base (in account currency) to use for RiskPercent sizing.
+// Each mode is documented in the S12_Trade input block above.
+double CalcRiskBase()
+  {
+   double bal = AccountBalance();
+   double eq  = AccountEquity();
+
+   switch(RiskMode)
+     {
+      case RM_FIXED:
+         return(bal);   // not used by CalcLotSize — kept for safety
+
+      case RM_BALANCE:
+         return(bal);
+
+      case RM_EQUITY:
+         // RM_EQUITY must be explicitly unlocked.  If AllowEquityMode is false we fall
+         // back to balance silently so the EA never opens oversized lots by accident.
+         if(!AllowEquityMode)
+           {
+            Print("ICT-V CalcRiskBase: RM_EQUITY requested but AllowEquityMode=false — falling back to Balance");
+            return(bal);
+           }
+         return(eq);
+
+      case RM_AVERAGE:
+         // Uses the three-point average to dampen intraday equity spikes.
+         // g_dayHighEquity / g_dayLowEquity are tracked in OnTick and reset each day.
+         if(g_dayHighEquity <= 0 || g_dayLowEquity <= 0)
+            return(bal);  // not yet populated (first tick of the day)
+         return((bal + g_dayHighEquity + g_dayLowEquity) / 3.0);
+
+      case RM_HYBRID:
+         // Winning: compound gently.  Losing: protect capital faster.
+         if(eq >= bal)
+            return(0.5 * eq + 0.5 * bal);   // winning — moderate scale-up
+         else
+            return(0.7 * bal + 0.3 * eq);   // losing  — heavier balance weighting
+     }
+   return(bal);  // unreachable — satisfies compiler
+  }
+
 double CalcLotSize(double slPrice, bool isBuy)
   {
-   if(!UseRiskPercent || slPrice <= 0)
+   if(RiskMode == RM_FIXED || slPrice <= 0)
       return(LotSize);
 
    double entry = isBuy ? Ask : Bid;
@@ -4024,22 +4179,26 @@ double CalcLotSize(double slPrice, bool isBuy)
    if(slDist <= 0)
       return(LotSize);
 
-   double tickVal = MarketInfo(Symbol(), MODE_TICKVALUE);
+   double tickVal  = MarketInfo(Symbol(), MODE_TICKVALUE);
    double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
    if(tickSize <= 0 || tickVal <= 0)
       return(LotSize);
 
-   double riskMoney = AccountBalance() * RiskPercent / 100.0;
-   double lots = riskMoney / (slDist / tickSize * tickVal);
+   double riskMoney = CalcRiskBase() * RiskPercent / 100.0;
+   double lots      = riskMoney / (slDist / tickSize * tickVal);
 
    double minLot = MarketInfo(Symbol(), MODE_MINLOT);
    double maxLot = MarketInfo(Symbol(), MODE_MAXLOT);
    double step   = MarketInfo(Symbol(), MODE_LOTSTEP);
+
    lots = MathFloor(lots / step) * step;
-   if(lots < minLot)
-      lots = minLot;
-   if(lots > maxLot)
-      lots = maxLot;
+   if(lots < minLot) lots = minLot;
+   if(lots > maxLot) lots = maxLot;
+
+   // Hard cap — protects against large accounts or extreme RR setups.
+   if(MaxLotCap > 0 && lots > MaxLotCap)
+      lots = MaxLotCap;
+
    return(NormalizeDouble(lots, 2));
   }
 
@@ -4054,6 +4213,8 @@ bool OpenTrade(bool isBuy, double sl, double tp, int score)
   {
    if(g_bootstrapping || !EnableTrading)
       return(false);
+   if(PL_IsLocked())
+     { return(false); }
    if(!IsTradeAllowed())
      { Print("ICT-V trade skipped: auto trading is disabled in MT4 toolbar"); return(false); }
    if(IsTradeContextBusy())
@@ -4155,7 +4316,7 @@ bool OpenTrade(bool isBuy, double sl, double tp, int score)
       ticket = OrderSend(Symbol(), type, lots, price, Slippage,
                          ECNMode ? 0 : (useSL ? sl : 0),
                          ECNMode ? 0 : (useTP ? tp : 0),
-                         cmt, MagicNumber, 0, isBuy ? clrGreen : clrRed);
+                         cmt, g_magic, 0, isBuy ? clrGreen : clrRed);
       if(ticket < 0)
         {
          int err = GetLastError();
@@ -4172,8 +4333,10 @@ bool OpenTrade(bool isBuy, double sl, double tp, int score)
          if(!OrderModify(ticket, OrderOpenPrice(), useSL ? sl : 0, useTP ? tp : 0, 0, clrNONE))
             Print("ICT-V ECN SL/TP modify failed #", ticket, " err=", GetLastError());
      }
+   g_tradesToday++;   // increment for UseMaxTradesPerDay gate
    Print("ICT-V OPEN ", (isBuy ? "BUY" : "SELL"), " #", ticket,
-         " score=", score, "/11 lots=", lots, " SL=", sl, " TP=", tp);
+         " score=", score, "/11 lots=", lots, " SL=", sl, " TP=", tp,
+         " tradesToday=", g_tradesToday);
    return(true);
   }
 
@@ -4620,6 +4783,7 @@ void EvaluateAndTrade(int shift)
    bool newsEntryBlock = (UseNewsFilter && IsNewsBlackout(iTime(Symbol(), Period(), shift)));
    bool cbBlock = CB_IsTripped();
    bool hoursBlock = (!TH_EntryAllowed()) || TH_PostEODBlock();
+   bool safetyBlock = SG_IsBlocked();
 
    // Pine parity: long evaluated first (cooldown), short second; same-bar panel = last writer (SHORT)
    if(longSignal)
@@ -4643,7 +4807,7 @@ void EvaluateAndTrade(int shift)
             FireAlertOnce(g_alertBarLongSig,
                "ICT-V: Validated LONG signal - check panel for confluence score");
            }
-         if(AllowLong && !newsEntryBlock && !cbBlock && !hoursBlock)
+         if(AllowLong && !newsEntryBlock && !cbBlock && !hoursBlock && !safetyBlock)
             OpenTrade(true, UseSignalSLTP ? slLong : 0, UseSignalSLTP ? tpLong : 0, longScore);
         }
      }
@@ -4663,7 +4827,7 @@ void EvaluateAndTrade(int shift)
             FireAlertOnce(g_alertBarShortSig,
                "ICT-V: Validated SHORT signal - check panel for confluence score");
            }
-         if(AllowShort && !newsEntryBlock && !cbBlock && !hoursBlock)
+         if(AllowShort && !newsEntryBlock && !cbBlock && !hoursBlock && !safetyBlock)
             OpenTrade(false, UseSignalSLTP ? slShort : 0, UseSignalSLTP ? tpShort : 0, shortScore);
         }
      }
@@ -5086,16 +5250,46 @@ void ClearDashboardObjects()
 //+------------------------------------------------------------------+
 //| Dashboard                                                        |
 //+------------------------------------------------------------------+
+bool PL_IsLocked()
+  {
+   if(!UseDailyProfitLock || DailyProfitLockPct <= 0) return(false);
+   if(g_profitLockToday) return(true);
+   double realPnL  = CB_DailyRealizedPnL_Cached();
+   double floatPnL = 0;
+   for(int i = 0; i < OrdersTotal(); i++)
+     {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() == g_magic && OrderSymbol() == Symbol())
+         floatPnL += OrderProfit() + OrderSwap() + OrderCommission();
+     }
+   double totalDay = realPnL + floatPnL;
+   double target   = g_cbDayStartBalance * DailyProfitLockPct / 100.0;
+   if(totalDay >= target)
+     {
+      g_profitLockToday = true;
+      string msg = StringFormat("ICT-V PROFIT LOCK: +%.1f%% target reached (P&L=%.2f). Take the bag and go home.", DailyProfitLockPct, totalDay);
+      Print(msg);
+      if(!IsTesting()) { if(EnableAlerts) Alert(msg); if(EnablePushNotify) SendNotification(msg); }
+      UpdateDashboard();
+      return(true);
+     }
+   return(false);
+  }
+
 void Journal_Init()
   {
    if(!UseTradeJournal) { g_journalLastHistTotal = OrdersHistoryTotal(); return; }
    int fh = FileOpen(JournalFileName, FILE_CSV|FILE_READ|FILE_WRITE|FILE_SHARE_READ);
    if(fh == INVALID_HANDLE) { Print("ICT-V Journal: cannot open ", JournalFileName); return; }
    FileSeek(fh, 0, SEEK_END);
-   if(FileTell(fh) == 0)
-      FileWrite(fh, "Ticket,OpenTime,CloseTime,Symbol,Direction,Lots,OpenPrice,SL0,TP,ClosePrice,Score,Profit,Swap,Commission,Net,RR");
+   bool isNew = (FileTell(fh) == 0);
+   if(isNew)
+      FileWrite(fh, "Ticket,OpenTime,CloseTime,Symbol,Direction,Magic,Lots,OpenPrice,SL0,TP,ClosePrice,Score,Profit,Swap,Commission,Net,RR");
    FileClose(fh);
-   g_journalLastHistTotal = OrdersHistoryTotal();
+   g_journalLastHistTotal = isNew ? 0 : OrdersHistoryTotal();
+   Print("ICT-V Journal: init | file=", JournalFileName, " isNew=", isNew,
+         " scanFrom=", g_journalLastHistTotal, " histTotal=", OrdersHistoryTotal(),
+         " g_magic=", g_magic, " Symbol=", Symbol());
   }
 
 void Journal_CheckNewTrades()
@@ -5106,33 +5300,47 @@ void Journal_CheckNewTrades()
    int fh = FileOpen(JournalFileName, FILE_CSV|FILE_READ|FILE_WRITE|FILE_SHARE_READ);
    if(fh == INVALID_HANDLE) { Print("ICT-V Journal: cannot open ", JournalFileName); return; }
    FileSeek(fh, 0, SEEK_END);
+   int written = 0, skippedType = 0;
    for(int i = g_journalLastHistTotal; i < histTotal; i++)
      {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-      if(OrderMagicNumber() != MagicNumber || OrderSymbol() != Symbol()) continue;
-      if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-      double sl0 = 0, lots0 = 0;
-      Ex_ParseEntryMeta(OrderComment(), sl0, lots0);
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+        { skippedType++; continue; }
       string dir = (OrderType() == OP_BUY) ? "BUY" : "SELL";
       double openPx  = OrderOpenPrice();
       double closePx = OrderClosePrice();
       double net = OrderProfit() + OrderSwap() + OrderCommission();
+      // Use actual SL from order record; fall back to comment metadata for EA trades
+      double sl0 = OrderStopLoss();
+      if(sl0 == 0) { double _l = 0; Ex_ParseEntryMeta(OrderComment(), sl0, _l); }
       double rr  = 0;
-      if(sl0 > 0)
+      if(sl0 > 0 && MathAbs(openPx - sl0) > Point)
         {
          double risk = MathAbs(openPx - sl0);
-         if(risk > 0)
-            rr = (OrderType() == OP_BUY) ? (closePx - openPx) / risk : (openPx - closePx) / risk;
+         rr = (OrderType() == OP_BUY) ? (closePx - openPx) / risk : (openPx - closePx) / risk;
         }
       string cmt = OrderComment();
       int sp = StringFind(cmt, "score=");
-      string scoreStr = "?";
+      string scoreStr = (OrderMagicNumber() == g_magic) ? "?" : "-";
       if(sp >= 0) { int ep = StringFind(cmt, "/", sp); if(ep > sp) scoreStr = StringSubstr(cmt, sp + 6, ep - sp - 6); }
+      // Update consecutive-loss streak counter for EA trades only.
+      if(OrderMagicNumber() == g_magic)
+        {
+         if(net < -0.005)
+            g_consecLosses++;
+         else if(net > 0.005)
+           {
+            if(g_consecLosses > 0)
+               Print("ICT-V SafetyGate: winning trade reset consecutive losses (was ", g_consecLosses, ")");
+            g_consecLosses = 0;
+           }
+        }
       FileWrite(fh,
                 IntegerToString(OrderTicket()),
                 TimeToString(OrderOpenTime(),  TIME_DATE|TIME_SECONDS),
                 TimeToString(OrderCloseTime(), TIME_DATE|TIME_SECONDS),
                 OrderSymbol(), dir,
+                IntegerToString(OrderMagicNumber()),
                 DoubleToString(OrderLots(), 2),
                 DoubleToString(openPx, Digits),
                 sl0 > 0 ? DoubleToString(sl0, Digits) : "",
@@ -5144,8 +5352,11 @@ void Journal_CheckNewTrades()
                 DoubleToString(OrderCommission(), 2),
                 DoubleToString(net, 2),
                 DoubleToString(rr, 2));
+      written++;
      }
    FileClose(fh);
+   Print("ICT-V Journal: wrote=", written, " skippedType=", skippedType,
+         " range=[", g_journalLastHistTotal, "..", histTotal-1, "]");
    g_journalLastHistTotal = histTotal;
   }
 
@@ -5287,6 +5498,7 @@ void UpdateDashboard()
    int acctRows = 0;
    if(ShowDailyPnL || ShowMultiPairInfo) acctRows++;  // separator
    if(ShowDailyPnL)       acctRows += 2;
+   if(ShowDailyPnL && UseDailyProfitLock) acctRows++;
    if(ShowMultiPairInfo)  acctRows++;
    int panelW = 248, panelH = y0 + (27 + acctRows) * dy + 10;
 
@@ -5454,7 +5666,7 @@ void UpdateDashboard()
          for(int oi = 0; oi < OrdersTotal(); oi++)
            {
             if(!OrderSelect(oi, SELECT_BY_POS, MODE_TRADES)) continue;
-            if(OrderMagicNumber() == MagicNumber && OrderSymbol() == Symbol())
+            if(OrderMagicNumber() == g_magic && OrderSymbol() == Symbol())
                floatPnL += OrderProfit() + OrderSwap() + OrderCommission();
            }
          double totalDay = realPnL + floatPnL;
@@ -5473,6 +5685,14 @@ void UpdateDashboard()
          color cbStrCol = !UseCircuitBreaker ? cGray
                           : (g_cbTotalTripped || g_cbTrippedToday ? cBear : cBull);
          PanelRow(aRow++, xL, xR, y0, dy, corner, fsz, "CB Status:", cbStr, cGray, cbStrCol);
+         if(UseDailyProfitLock)
+           {
+            string plStr = g_profitLockToday
+                           ? "TAKE THE BAG AND GO HOME"
+                           : StringFormat("Target: +%.1f%%", DailyProfitLockPct);
+            color plCol  = g_profitLockToday ? cGold : cGray;
+            PanelRow(aRow++, xL, xR, y0, dy, corner, fsz, "Profit Lock:", plStr, cGray, plCol);
+           }
         }
       if(ShowMultiPairInfo)
         {
@@ -5480,7 +5700,7 @@ void UpdateDashboard()
          for(int oi = 0; oi < OrdersTotal(); oi++)
            {
             if(!OrderSelect(oi, SELECT_BY_POS, MODE_TRADES)) continue;
-            if(OrderMagicNumber() == MagicNumber) allMagic++;
+            if(OrderMagicNumber() == g_magic) allMagic++;
            }
          PanelRow(aRow, xL, xR, y0, dy, corner, fsz,
                   "All Magic:", IntegerToString(allMagic) + " open", cGray,
@@ -5495,8 +5715,36 @@ void UpdateDashboard()
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
+// Deterministic magic number derived from Symbol + Timeframe.
+// djb2 hash mapped to 10,000,000–98,999,999 to avoid common manual ranges.
+// Same chart always produces the same number across EA restarts.
+int AutoMagic()
+  {
+   string s = Symbol() + IntegerToString(Period());
+   long h = 5381;
+   for(int i = 0; i < StringLen(s); i++)
+      h = h * 33 + StringGetCharacter(s, i);
+   return (int)(MathAbs(h) % 89000000) + 10000000;
+  }
+
 int OnInit()
   {
+   // Resolve magic number before anything else uses g_magic.
+   g_magic = (MagicInput != 0) ? MagicInput : AutoMagic();
+   // Warn if another open order already holds this magic on a different symbol —
+   // that would mean two EA instances are sharing a magic unintentionally.
+   for(int _i = OrdersTotal() - 1; _i >= 0; _i--)
+     {
+      if(!OrderSelect(_i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() == g_magic && OrderSymbol() != Symbol())
+        {
+         Print("ICT-V WARNING: magic=", g_magic, " already in use by open order on ",
+               OrderSymbol(), " — set MagicInput manually to a unique value to avoid cross-chart interference");
+         break;
+        }
+     }
+   Print("ICT-V magic=", g_magic, (MagicInput == 0 ? " (auto: Symbol+TF hash)" : " (manual input)"));
+
    if(SwingLength < 3 || InternalLength < 2 || HTFSwingLength < 3)
      {
       Print("SwingLength>=3, InternalLength>=2, HTFSwingLength>=3 required");
@@ -5569,7 +5817,7 @@ int OnInit()
          " Asian=", KZAsian, " London=", KZLondon,
          " NY AM=", KZNYAM, " NY PM=", KZNYPM);
    Print("EnableTrading=", EnableTrading, " EnableSignals=", EnableSignals,
-         " MinScore=", MinSignalScore, "/11 Magic=", MagicNumber);
+         " MinScore=", MinSignalScore, "/11 Magic=", g_magic);
    EventSetTimer(3);
    return(INIT_SUCCEEDED);
   }
@@ -5612,6 +5860,13 @@ void OnTick()
       CloseAllOurTrades();
    CB_IsTripped();   // intrabar equity-stop / flatten (entry gate also calls on new bars)
    TH_HandleEOD(); // once-per-day EOD flatten at broker time (if enabled)
+
+   // Track intraday equity envelope for RM_AVERAGE and RM_HYBRID sizing modes.
+   double eq = AccountEquity();
+   if(g_dayHighEquity <= 0) g_dayHighEquity = eq;   // initialise on first tick after attach
+   if(g_dayLowEquity  <= 0) g_dayLowEquity  = eq;
+   if(eq > g_dayHighEquity) g_dayHighEquity = eq;
+   if(eq < g_dayLowEquity)  g_dayLowEquity  = eq;
 
    ManageOpenTrades();
    Journal_CheckNewTrades();
