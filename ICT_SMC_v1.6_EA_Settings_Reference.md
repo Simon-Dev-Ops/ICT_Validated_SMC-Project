@@ -1,25 +1,48 @@
 # ICT Validated SMC v1.6 EA — Settings Reference
 
-**EA Version**: v1.94 (MQL4 port of Pine v1.6)
+**EA Version**: v2.00 (MQL4 port of Pine v1.6)
 **Broker**: IC Markets Global — XAUUSD
-**Updated**: 2026-06-18
+**Updated**: 2026-06-20
+
+---
+
+## VALIDATED DEFAULT SETTINGS (BT6 — 2026-06-20)
+
+These settings are now the EA defaults. They produced the best validated results across 6 backtests on XAUUSD M15.
+
+**Backtest period**: 2025-10-09 → 2026-06-09 (8 months) | $10,000 deposit | Open-prices-only
+**Result**: 793 trades | **59.52% win rate** | **$11,635 net profit** | **7.14% absolute drawdown** | PF 1.25
+**FTMO status**: Passes total drawdown (7.14% < 10% limit). Enable CB + news filter for daily DD protection.
+**Overall grade**: **B+**
+
+| Parameter | Validated Value | Why |
+|-----------|----------------|-----|
+| `RequireCISD` | `true` | Biggest single improvement — added CISD confirmation, pushed win rate to 59.52% |
+| `RequireHTFAlign` | `false` | HTF alignment not required; gives more trades with same win rate |
+| `MinSignalScore` | `4` | Pine v1.6 default — sufficient with CISD filter active |
+| `RiskMode` | `RM_BALANCE` | Balance-based risk; stable lot sizing for FTMO |
+| `RiskPercent` | `1.0` | 1% per trade — FTMO-safe; absolute DD stayed at 7.14% |
+| `UseTrailingStop` | `true` | Essential — transforms avg win from $47 to $121 |
+| `TrailingStartPts` | `4000` | Activate trail after 400 pts (XAUUSD $4.00 move) |
+| `TrailingDistancePts` | `2000` | Keep SL 200 pts behind price |
+| `TrailingStepPts` | `400` | Move SL in 40-pt increments |
+| `UseRMultipleBE` | `true` | Move SL to BE at 1R — protects partial profits |
+| `UsePartialClose` | `true` | 50% at 1R, then BE, then 50% of remainder at 2R |
 
 ---
 
 ## QUICK SETUP CHECKLIST
 
-Before going live, work through this checklist in order:
+BT6 defaults are already correct for signal quality and risk. Before going live, only these 3 steps are needed:
 
-| # | Action | Input | Set To |
-|---|--------|-------|--------|
-| 1 | Choose lot mode | `UseRiskPercent` | `true` (risk %) or `false` (fixed lots) |
-| 2 | Set risk per trade | `RiskPercent` | `1.0` (1% of balance) |
-| 3 | OR set fixed lot | `LotSize` | e.g. `0.02` |
-| 4 | Set max positions | `MaxPositionsPerDirection` | `1` (FTMO conservative) |
-| 5 | Enable circuit-breaker | `UseCircuitBreaker` | `true` |
-| 6 | Enable news filter | `UseNewsFilter` | `true` |
-| 7 | Enable ECN mode | `ECNMode` | `true` (IC Markets Raw Spread) |
-| 8 | Confirm kill-switch is on | `EnableTrading` | `true` |
+| # | Action | Input | Set To | Status |
+|---|--------|-------|--------|--------|
+| 1 | Confirm risk mode | `RiskMode` | `RM_BALANCE` | **Default ✓** |
+| 2 | Confirm risk per trade | `RiskPercent` | `1.0` | **Default ✓** |
+| 3 | Enable circuit-breaker | `UseCircuitBreaker` | `true` | Change from default |
+| 4 | Enable news filter | `UseNewsFilter` | `true` | Change from default |
+| 5 | Enable ECN mode | `ECNMode` | `true` (IC Markets Raw Spread) | Change from default |
+| 6 | Confirm kill-switch | `EnableTrading` | `true` | **Default ✓** |
 
 ---
 
@@ -179,9 +202,9 @@ Core signal filter settings. Matched to Pine v1.6.
 |-------|---------|-------------|
 | `EnableSignals` | `true` | Master switch for signal detection. |
 | `MinSignalScore` | `4` | Minimum confluence score (out of 11) to fire a signal. Pine v1.6 default = 4. |
-| `RequireHTFAlign` | `true` | Signal only fires if HTF structure agrees with direction. Pine default = true. |
+| `RequireHTFAlign` | `false` | Signal only fires if HTF structure agrees with direction. BT6 validated: false gives more trades with same win rate. |
 | `RequireKillzone` | `false` | Signal only fires during active killzone window. |
-| `RequireCISD` | `false` | Require Change In State of Delivery confirmation. |
+| `RequireCISD` | `true` | Require Change In State of Delivery confirmation. **Key filter — do not disable.** Pushed win rate from 54% to 59.52%. |
 | `ShowSigSL` | `true` | Draw signal SL on chart. Display only. |
 | `ShowSigTP` | `true` | Draw signal TP on chart. Display only. |
 | `SignalCooldownBars` | `10` | Bars to wait after a signal before another can fire. Pine default = 10. |
@@ -239,9 +262,9 @@ The most important section for live trading.
 | `EnableTrading` | `true` | `true` | Master kill-switch. Set `false` for signals-only mode. |
 | `AllowLong` | `true` | `true` | Allow buy trades. |
 | `AllowShort` | `true` | `true` | Allow sell trades. |
-| `LotSize` | `0.02` | — | Fixed lot size (used when `UseRiskPercent=false`). |
-| `UseRiskPercent` | `false` | **`true`** | Risk-based sizing: lots calculated from balance × RiskPercent ÷ SL distance. |
-| `RiskPercent` | `1.0` | `1.0` | % of balance risked per trade. 1% is standard FTMO-safe sizing. |
+| `LotSize` | `0.02` | — | Fixed lot size (used when `RiskMode=RM_FIXED`). |
+| `RiskMode` | `RM_BALANCE` | `RM_BALANCE` | Position sizing mode. `RM_BALANCE` = risk % of balance (FTMO recommended). `RM_FIXED` = fixed lots. |
+| `RiskPercent` | `1.0` | `1.0` | % of balance risked per trade. 1% is FTMO-safe; BT6 produced 7.14% absolute DD at this level. |
 | `MagicNumber` | `20260615` | Keep default | Identifies EA's orders. Don't change if you have open trades. |
 | `MaxSpreadPoints` | `50` | `50` | Block trades if spread exceeds this. 50 pts = 0.5 pip on XAUUSD. |
 | `Slippage` | `30` | `30` | Max allowed slippage in points. |
@@ -254,10 +277,10 @@ The most important section for live trading.
 | `UseBreakEven` | `false` | — | Points-based break-even. Use `UseRMultipleBE` instead (S16). |
 | `BreakEvenTriggerPts` | `150` | — | Profit in points before points-BE activates. |
 | `BreakEvenLockPts` | `10` | — | SL locks this many points beyond entry at BE. |
-| `UseTrailingStop` | `false` | — | Points-based trailing stop. |
-| `TrailingStartPts` | `200` | — | Profit in points before trail activates. |
-| `TrailingDistancePts` | `100` | — | Trail keeps SL this far behind price. |
-| `TrailingStepPts` | `20` | — | Min SL movement increment for trail. |
+| `UseTrailingStop` | `true` | `true` | Points-based trailing stop. **Keep enabled** — transformed avg win from $47 to $121 in BT6. |
+| `TrailingStartPts` | `4000` | `4000` | Profit in points before trail activates. 4000 pts = $4.00 move on XAUUSD. |
+| `TrailingDistancePts` | `2000` | `2000` | Trail keeps SL this far behind price. 2000 pts = $2.00 below current price. |
+| `TrailingStepPts` | `400` | `400` | Min SL movement per step. 400 pts = $0.40 — prevents micro-moves. |
 
 ---
 
@@ -351,23 +374,28 @@ R-based scaling — preferred over the points-based S12 options.
 
 ## FTMO CHALLENGE SETUP — RECOMMENDED SETTINGS SUMMARY
 
-Settings to change from defaults before starting the FTMO challenge:
+Most settings are already correct (BT6 defaults). Only these need to be changed before going live:
 
 ```
-UseRiskPercent         = true
-RiskPercent            = 1.0          // 1% per trade
-MaxPositionsPerDirection = 1          // conservative; raise to 2-3 max
-ECNMode                = true         // IC Markets Raw Spread account
+// Already set correctly by default (BT6 validated):
+RiskMode               = RM_BALANCE   // ✓ default
+RiskPercent            = 1.0          // ✓ default — 1% per trade
+RequireCISD            = true         // ✓ default
+UseTrailingStop        = true         // ✓ default
+TrailingStartPts       = 4000         // ✓ default
+TrailingDistancePts    = 2000         // ✓ default
+TrailingStepPts        = 400          // ✓ default
 
+// Enable these before live / FTMO (off by default — safety):
+ECNMode                = true         // IC Markets Raw Spread account
 UseNewsFilter          = true         // FTMO rule compliance
 UseCircuitBreaker      = true         // FTMO rule compliance
-
 CB_MaxDailyLossPct     = 4.5          // FTMO 5% daily; 4.5% safety margin
 CB_MaxTotalLossPct     = 9.0          // FTMO 10% max DD; 9% safety margin
-CB_FlattenOnTrip       = false        // let existing trades run
+CB_FlattenOnTrip       = false        // let existing trades run to SL/TP
 
-// Enable when you know specific FTMO evaluation period start:
-// CB_ResetInitialBalance = true  → then immediately back to false
+// Reset DD baseline at start of each FTMO phase:
+// CB_ResetInitialBalance = true  → save → immediately back to false
 ```
 
 ---

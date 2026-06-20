@@ -16,6 +16,8 @@
 #property version   "2.00"
 #property strict
 
+#include "MFE_MAE_Logger.mqh"
+
 //--- array capacity (Pine caps referenced in comments)
 #define MAX_SWINGS          100
 #define MAX_INTERNAL_SWINGS 80
@@ -196,9 +198,9 @@ input int      OTEMaxCount            = 3;
 input string   S9_Signals             = "=== SIGNAL GENERATION ===";
 input bool     EnableSignals          = true;
 input int      MinSignalScore         = 4;       // Pine: minSigScore (max 8 in v1.6)
-input bool     RequireHTFAlign        = true;   // Pine: requireHTFAlign (default true)
+input bool     RequireHTFAlign        = false;  // Pine: requireHTFAlign (default true)
 input bool     RequireKillzone        = false;  // Pine: requireKZActive
-input bool     RequireCISD            = false;
+input bool     RequireCISD            = true;
 input bool     ShowSigSL              = true;    // display only
 input bool     ShowSigTP              = true;    // display only
 input int      SignalCooldownBars     = 10;     // Pine: sigCooldown (default 10)
@@ -260,7 +262,7 @@ input bool     AllowShort             = true;
 //             Best for funded accounts targeting long-term growth.
 // ─────────────────────────────────────────────────────────────────────────────
 input double         LotSize          = 0.02;           // lot size when RiskMode = RM_FIXED
-input ENUM_RISK_MODE RiskMode         = RM_FIXED;       // position sizing mode (RM_FIXED = behaves exactly as before)
+input ENUM_RISK_MODE RiskMode         = RM_BALANCE;     // position sizing mode (RM_FIXED = behaves exactly as before)
 input double         RiskPercent      = 1.0;            // % of base capital risked per trade (only used when RiskMode != RM_FIXED)
 input double         MaxLotCap        = 0.00;           // hard maximum lots per trade (0 = no cap)
 input bool           AllowEquityMode  = false;          // safety lock: must be true to activate RM_EQUITY
@@ -278,10 +280,10 @@ input double   FallbackTP_RR          = 2.0;   // if no swing TP beyond entry
 input bool     UseBreakEven           = false;
 input double   BreakEvenTriggerPts    = 150;   // profit points before BE
 input double   BreakEvenLockPts       = 10;    // SL locked this many points above/below entry
-input bool     UseTrailingStop        = false;
-input double   TrailingStartPts       = 200;   // profit points before trail activates
-input double   TrailingDistancePts    = 100;   // trail distance behind price
-input double   TrailingStepPts        = 20;    // min SL move increment
+input bool     UseTrailingStop        = true;
+input double   TrailingStartPts       = 4000;  // profit points before trail activates
+input double   TrailingDistancePts    = 2000;  // trail distance behind price
+input double   TrailingStepPts        = 400;   // min SL move increment
 
 //+------------------------------------------------------------------+
 //| INPUTS � News filter                                             |
@@ -4548,6 +4550,7 @@ bool Ex_TryMoveSL(int ticket, bool isBuy, double entry, double targetSL,
       Print("ICT-V SL modify failed #", ticket, " err=", GetLastError());
       return(false);
      }
+   MFE_MAE_LogTrailModify(ticket, curSL, targetSL, price);
    return(true);
   }
 
@@ -5819,6 +5822,7 @@ int OnInit()
    Print("EnableTrading=", EnableTrading, " EnableSignals=", EnableSignals,
          " MinScore=", MinSignalScore, "/11 Magic=", g_magic);
    EventSetTimer(3);
+   MFE_MAE_Init();
    return(INIT_SUCCEEDED);
   }
 
@@ -5827,6 +5831,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   MFE_MAE_OnDeinit();
    EventKillTimer();
    DelPrefix(PFX);
    Comment("");
@@ -5855,6 +5860,7 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   MFE_MAE_OnTick();
    MaybeRefreshNews();
    if(UseNewsFilter && NewsCloseOpenTrades && IsNewsBlackout(TimeCurrent()))
       CloseAllOurTrades();
